@@ -1,0 +1,4 @@
+All video files in this directory and its sub directories are licensed
+under CC BY-SA 3.0 by @Goldjunge (member of the German Raspberry Pi forum).
+https://forum-raspberrypi.de/user/42424-goldjunge/
+
