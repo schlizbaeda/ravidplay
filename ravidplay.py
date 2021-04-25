@@ -44,7 +44,7 @@ import gpiozero
 
 
 
-
+VERSION = '1.0'
 
 OMXINSTANCE_ERR_WRONG_STATE = -3 # No video selected due to wrong state in StateMachine.select_video(...)
 OMXINSTANCE_ERR_NO_VIDEO = -2 # No video defined for idle/applause
@@ -71,14 +71,13 @@ STATE_PLAY_IDLE2_VIDEO = 21
 VERBOSE_NONE = 0
 VERBOSE_ERROR = 1
 VERBOSE_WARNING = 2
-VERBOSE_STATE = 3
-VERBOSE_STATE_PROGRESS = 4
-VERBOSE_GPIO = 5
-VERBOSE_VIDEOINFO = 6
-#VERBOSE_ACTION = 7
-#VERBOSE_DETAIL = 8
-VERBOSE_SHOW_INSTANCES = 10
-VERBOSE_DEBUG = 9
+VERBOSE_VERSION = 3
+VERBOSE_STATE = 4
+VERBOSE_STATE_PROGRESS = 5
+VERBOSE_GPIO = 6
+VERBOSE_VIDEOINFO = 7
+VERBOSE_DEBUG = 8
+VERBOSE_SHOW_INSTANCES = 9
 
 
 # Global constants set by code, config file, command line parameters.
@@ -214,7 +213,6 @@ class Config():
             try:
                 f = open(filenam, 'r')
             except Exception:
-                print('cant read!')
                 f = []
         for lin in f:
             lin = lin.split('#')[0] # Remove comments marked with #
@@ -356,11 +354,8 @@ class Config():
 
     def set_common_config(self):
         self.set_code_defaults() # Take hard-coded default parameters
-        #self.print_properties('hard-coded default values')
         self.read_from_cfg('')   # Overwrite parameters with common config file
-        #self.print_properties('Common Config File')
         self.read_from_cfg(None) # Overwrite parameters with command line
-        self.print_properties('CMDLIN PARAMS')
         pass
 
     def videos(self, category):
@@ -564,11 +559,17 @@ class VideoPlayer:
 
 class StateMachine:
     def __init__(self):
+        self.progname = os.path.realpath(sys.argv[0])
         self.exitcode = 0
         self.omxplayer_cmdlin_params = []
 
         self.cfg = Config()
         self.cfg.set_common_config()
+        print_verbose('Welcome to {} v{}'.format(
+                os.path.basename(self.progname),
+                VERSION),
+                VERBOSE_VERSION)
+        self.cfg.print_properties(caption='COMMON CONFIGURATION')
         
         # Non-video properties:
         self.timeslot = self.cfg.timeslot
@@ -577,9 +578,13 @@ class StateMachine:
         self.randomindex_cntdn = self.cfg.randomindex_cntdn
         self.randomindex_appl = self.cfg.randomindex_appl
         
+        # Lists of video files:
         self.videos_idle = self.cfg.videos('-idle:')
         self.videos_cntdn = self.cfg.videos('-cntdn:')
         self.videos_appl = self.cfg.videos('-appl:')
+        if len(self.videos_appl) == 0:
+            # Create another instance of list with identical contents!
+            self.videos_appl = self.videos_idle.copy()
 
         # Create two instances of omxplayer management:
         self.manage_instance = 0
@@ -936,58 +941,108 @@ class StateMachine:
                 print_verbose('file to exchange: "{}"'.format(
                         video[VID_FILENAM]),
                     VERBOSE_DEBUG) # todo: try-catch wrong filename!
-                self.pl[inst_paused].omxplayer.load(video[VID_FILENAM], True)
-                # 4th: really important!
-                #      Adjust inst.duration to length of CNTDN video sequence!
-                self.pl[inst_paused].duration = \
-                     self.pl[inst_paused].omxplayer.duration()
-                # 5th: Set next state:
-                #      skip STATE_SELECT_CNTDN_VIDEO because it was done here:
-                if inst_paused == OMXINSTANCE_VIDEO1:
-                    self.state = STATE_START_IDLE1_VIDEO
-                elif inst_paused == OMXINSTANCE_VIDEO2:
-                    self.state = STATE_START_IDLE2_VIDEO
-    
-                ######## Handle 'Playing' omxplayer instance ########
-                print_verbose('shorten playing idle omxplayer instance[{}] due to '
-                                'requested start of countdown video.'.format(
-                                    inst_playing), 
-                                VERBOSE_STATE)
-    
-                print_verbose('original OMXINSTANCE_VIDEO[{}] before '
-                              'start of countdown video:\n'
-                              '  fadetime_start=={}\n'
-                              '  fadetime_end=={}\n'
-                              '  position=={}\n'
-                              '  duration=={}'.format(inst_playing,
-                                    self.pl[inst_playing].fadetime_start,
-                                    self.pl[inst_playing].fadetime_end,
-                                    self.pl[inst_playing].position,
-                                    self.pl[inst_playing].duration),
-                              VERBOSE_DEBUG)
-                # Initiate now fading of idle video sequ. due to requ. CNTDN:
-                
-                # Exit from eventually fading-in:
-                self.pl[inst_playing].fadetime_start = 0
-                # Adjust the fade-out time of the running idle video sequence
-                # to the defined fade-out time of the planned CNTDN video
-                # sequence:
-                self.pl[inst_playing].fadetime_end = \
-                     self.cfg.fadetime_end_cntdn # todo!
-                # Shorten the duration of the running idle video sequence
-                # to "now" + fade_out time of CNTDN video sequence:
-                self.shorten_duration(inst_playing)
-                print_verbose('shorten OMXINSTANCE_VIDEO[{}] due to '
-                              'start of countdown video:\n'
-                              '  fadetime_start=={}\n'
-                              '  fadetime_end=={}\n'
-                              '  position=={}\n'
-                              '  duration=={}'.format(inst_playing,
-                                    self.pl[inst_playing].fadetime_start,
-                                    self.pl[inst_playing].fadetime_end,
-                                    self.pl[inst_playing].position,
-                                    self.pl[inst_playing].duration),
-                              VERBOSE_DEBUG)
+                # Catch some well-known long-lasting error conditions:
+                ret = 0
+                if video[VID_FILENAM] is None:
+                    # No video filename was given, e.g. due to empty video list:
+                    ret = 10
+                elif not os.path.exists(video[VID_FILENAM]):
+                    # Given filename doesn't exist:
+                    ret = 11
+                elif os.path.isdir(video[VID_FILENAM]):
+                #elif os.path.ismount(filenam) or os.path.isdir(filenam):
+                    # Given filename is a (mount point) directory:
+                    ret = 12
+                elif not os.access(video[VID_FILENAM], os.R_OK):
+                    # Read permission denied to filenam:
+                    ret = 13
+                if ret != 0:
+                    # An error occurred when selecting the CNTDN video sequence
+                    if ret == 10:
+                        self.errmsg = 'ret=={}: ' \
+                            'No countdown video filename was given ' \
+                            'due to empty countdown video list.'.format(
+                                ret)
+                    elif ret == 11:
+                        self.errmsg = 'ret=={}: ' \
+                            'Countdown video file "{}" not found.'.format(
+                                ret,
+                                video[VID_FILENAM])
+                    elif ret == 12:
+                        self.errmsg = 'ret=={}: ' \
+                            'Countdown video file "{}" is a directory.'.format(
+                                ret,
+                                video[VID_FILENAM])
+                    elif ret == 13:
+                        self.errmsg = 'ret=={}: ' \
+                            'Read permission denied to countdown video file ' \
+                            '"{}".'.format(
+                                ret,
+                                video[VID_FILENAM])
+                    else:
+                        self.errmsg = 'ret=={}: ' \
+                            'Unknown error at initialisation of countdown ' \
+                            'video instance[{}] with file "{}".'.format(
+                                ret,
+                                inst_paused,
+                                video[VID_FILENAM])
+                    self.state = STATE_ERROR
+                else: # The video file seems to be (almost) OK :-)
+                    self.pl[inst_paused].omxplayer.load(video[VID_FILENAM],
+                                                        True)
+                    # 4th: really important!
+                    #   Adjust inst.duration to length of CNTDN video sequence!
+                    self.pl[inst_paused].duration = \
+                         self.pl[inst_paused].omxplayer.duration()
+                    # 5th: Set next state:
+                    #   skip STATE_SELECT_CNTDN_VIDEO because it was done here:
+                    if inst_paused == OMXINSTANCE_VIDEO1:
+                        self.state = STATE_START_IDLE1_VIDEO
+                    elif inst_paused == OMXINSTANCE_VIDEO2:
+                        self.state = STATE_START_IDLE2_VIDEO
+                    
+                    ######## Handle 'Playing' omxplayer instance ########
+                    print_verbose('shorten playing idle omxplayer ' \
+                                    'instance[{}] due to requested start ' \
+                                    'of countdown video.'.format(
+                                        inst_playing), 
+                                        VERBOSE_STATE)
+                    
+                    print_verbose('original OMXINSTANCE_VIDEO[{}] before '
+                                  'start of countdown video:\n'
+                                  '  fadetime_start=={}\n'
+                                  '  fadetime_end=={}\n'
+                                  '  position=={}\n'
+                                  '  duration=={}'.format(inst_playing,
+                                        self.pl[inst_playing].fadetime_start,
+                                        self.pl[inst_playing].fadetime_end,
+                                        self.pl[inst_playing].position,
+                                        self.pl[inst_playing].duration),
+                                  VERBOSE_DEBUG)
+                    # Initiate now fading of idle video sequence
+                    # due to requested CNTDN:
+                    
+                    # Exit from eventually fading-in:
+                    self.pl[inst_playing].fadetime_start = 0
+                    # Adjust the fade-out time of the running idle video
+                    # sequence to the defined fade-out time of the planned
+                    # CNTDN video sequence:
+                    self.pl[inst_playing].fadetime_end = \
+                         self.cfg.fadetime_end_cntdn # todo!
+                    # Shorten the duration of the running idle video sequence
+                    # to "now" + fade_out time of CNTDN video sequence:
+                    self.shorten_duration(inst_playing)
+                    print_verbose('shorten OMXINSTANCE_VIDEO[{}] due to '
+                                  'start of countdown video:\n'
+                                  '  fadetime_start=={}\n'
+                                  '  fadetime_end=={}\n'
+                                  '  position=={}\n'
+                                  '  duration=={}'.format(inst_playing,
+                                        self.pl[inst_playing].fadetime_start,
+                                        self.pl[inst_playing].fadetime_end,
+                                        self.pl[inst_playing].position,
+                                        self.pl[inst_playing].duration),
+                                  VERBOSE_DEBUG)
             elif inst_none >= 1:
                 self.state = STATE_SELECT_CNTDN_VIDEO
 
@@ -1158,5 +1213,4 @@ if __name__ == '__main__':
     statemachine = StateMachine()
     statemachine.run()
     sys.exit(statemachine.exitcode)
-    
 #EOF
