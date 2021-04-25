@@ -13,3 +13,5 @@ cd python-omxplayer-wrapper
 sudo python3 setup.py install
 sudo python3 -m pip install mock
 cd ..
+# Install config file if it doesn't exist at destination yet:
+mv -n ravidplay.py.conf ~/.config

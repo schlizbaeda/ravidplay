@@ -33,12 +33,12 @@ exits.
 ## Planned but not yet implemented
 The video parameters like transparency, fading times etc. should be fetched
 in this priority order:  
-1) take the values given in the source code
-2) read a global config file and update the values
-3) update all values given by commandline parameters
-4) read a local config file with same filename as the according video
+1) done -- take the values given in the source code
+2) done -- read the global config file ~/.config/ravidplay.py.conf and update the values
+3) done -- update all values given by commandline parameters
+4) open -- read a local config file with same filename as the according video
 
-## Software Installation on the Raspberry Pi
+## Software Installation and Quick Start on the Raspberry Pi
 Clone this repository onto the Raspberry Pi and start the installation
 shell script [`ravidplay_setup.sh`](https://github.com/schlizbaeda/ravidplay/blob/main/ravidplay-setup.sh)
 in an LXTerminal:
@@ -47,6 +47,8 @@ cd /home/pi
 git clone https://github.com/schlizbaeda/ravidplay
 cd ravidplay
 ./ravidplay-setup.sh
+
+./ravidplay.py -idle: videos/idle/* -cntdn: videos/cntdn/* -appl: videos/appl/*
 ```
 
 ## Adjustment of Raspberry Pi OS desktop
@@ -82,9 +84,3 @@ and minimise the taskbar size to 0
    * Set "Size when minimised" to 0 pixels
    
    ![Panel Settings](./pictures/RaspiOS_TaskBar_PanelSettings.png "OS-dialogue 'Panel Settings'")
-
-**...and now enjoy `ravidplay.py` from the LX-Terminal:-)**
-```shell
-cd /home/pi/ravidplay
-./ravidplay.py
-```

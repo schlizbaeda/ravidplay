@@ -35,11 +35,15 @@
 # - get video parameters (transparency, fade times) from cfg resp. meta files
 
 import time, random
+import io      # for command # if type(f) is io.TextIOWrapper:
 import os      # getpid(): Get current process id
 import sys     # argv[], exitcode
 #from omxplayer.player import OMXPlayer
 import omxplayer.player
 import gpiozero
+
+
+
 
 
 OMXINSTANCE_ERR_WRONG_STATE = -3 # No video selected due to wrong state in StateMachine.select_video(...)
@@ -51,30 +55,16 @@ OMXLAYER = [52, 51, 53]
 
 VID_INDEX = 0
 VID_FILENAM = 1
-CMDLINPAR_IDLE_FADETIME_START = 0.5 #1.75
-CMDLINPAR_IDLE_FADETIME_END = 0.5 #1.75
-CMDLINPAR_IDLE_ALPHA_START = 0
-CMDLINPAR_IDLE_ALPHA_PLAY = 255
-CMDLINPAR_IDLE_ALPHA_END = 0
-CMDLINPAR_CNTDN_FADETIME_START = 0.5 #1.75
-CMDLINPAR_CNTDN_FADETIME_END = 0.5 #1.75
-CMDLINPAR_CNTDN_ALPHA_START = 0
-CMDLINPAR_CNTDN_ALPHA_PLAY = 255
-CMDLINPAR_CNTDN_ALPHA_END = 0
 
-
+# states of class StateMachine:
 STATE_EXIT = 0
 STATE_ERROR = 1
-
 STATE_PREPARE_CNTDN_VIDEO = 5
-
 STATE_SELECT_CNTDN_VIDEO = 7
 STATE_SELECT_APPL_VIDEO = 8
 STATE_SELECT_IDLE_VIDEO = 9
-
 STATE_START_IDLE1_VIDEO = 10
 STATE_PLAY_IDLE1_VIDEO = 11
-
 STATE_START_IDLE2_VIDEO = 20
 STATE_PLAY_IDLE2_VIDEO = 21
 
@@ -87,13 +77,37 @@ VERBOSE_GPIO = 5
 VERBOSE_VIDEOINFO = 6
 #VERBOSE_ACTION = 7
 #VERBOSE_DETAIL = 8
-
 VERBOSE_SHOW_INSTANCES = 10
 VERBOSE_DEBUG = 9
-VERBOSITY = VERBOSE_DEBUG # todo: CMDLIN_PARAM
+
+
+# Global constants set by code, config file, command line parameters.
+# These are the default values by code if no config file nor cmdlin param:
+DEFAULT_VERBOSITY = VERBOSE_DEBUG
+DEFAULT_TIMESLOT = 0.02
+DEFAULT_RANDOMINDEX_IDLE = 0  # -1 random selection 0 continuous selection
+DEFAULT_RANDOMINDEX_CNTDN = 0 # -1 random selection 0 continuous selection
+DEFAULT_RANDOMINDEX_APPL = 0  # -1 random selection 0 continuous selection
+
+DEFAULT_IDLE_FADETIME_START = 0.5 #1.75
+DEFAULT_IDLE_FADETIME_END = 0.5 #1.75
+DEFAULT_IDLE_ALPHA_START = 0
+DEFAULT_IDLE_ALPHA_PLAY = 255
+DEFAULT_IDLE_ALPHA_END = 0
+DEFAULT_CNTDN_FADETIME_START = 0.5 #1.75
+DEFAULT_CNTDN_FADETIME_END = 0.5 #1.75
+DEFAULT_CNTDN_GPIO_ON = 2.0  # time in seconds before video sequence ends
+DEFAULT_CNTDN_GPIO_OFF = 1.0 # time in seconds before video sequence ends
+DEFAULT_CNTDN_ALPHA_START = 0
+DEFAULT_CNTDN_ALPHA_PLAY = 255
+DEFAULT_CNTDN_ALPHA_END = 0
+
+
+gl_verbosity = DEFAULT_VERBOSITY
+
 
 def print_verbose(txt, verbosity, newline=True):
-    if VERBOSITY >= verbosity:
+    if gl_verbosity >= verbosity:
         if newline: print()
         
         if verbosity == VERBOSE_ERROR:
@@ -107,7 +121,265 @@ def print_verbose(txt, verbosity, newline=True):
         else:
             prefix = ''
         print('{}{}'.format(prefix, txt), end='', flush=True)	
-	
+
+class Config():
+    def print_properties(self, caption=None, verbosity=VERBOSE_DEBUG):
+        if caption is not None:
+            print_verbose('==== {} ===='.format(caption), verbosity)
+        print_verbose('gl_verbosity: {}'.format(gl_verbosity), verbosity)
+        print_verbose('', VERBOSE_DEBUG)
+        print_verbose('timeslot=={}'.format(self.timeslot), verbosity)
+        print_verbose('randomindex_idle=={}'.format(self.randomindex_idle), verbosity)
+        print_verbose('randomindex_cntdn=={}'.format(self.randomindex_cntdn), verbosity)
+        print_verbose('randomindex_appl=={}'.format(self.randomindex_appl), verbosity)
+        print_verbose('', VERBOSE_DEBUG)
+        print_verbose('fadetime_start_idle=={}'.format(self.fadetime_start_idle), verbosity)
+        print_verbose('fadetime_end_idle=={}'.format(self.fadetime_end_idle), verbosity)
+        print_verbose('fadetime_start_cntdn=={}'.format(self.fadetime_start_cntdn), verbosity)
+        print_verbose('fadetime_end_cntdn=={}'.format(self.fadetime_end_cntdn), verbosity)
+        print_verbose('gpio_on_cntdn=={}'.format(self.gpio_on_cntdn), verbosity)
+        print_verbose('gpio_off_cntdn=={}'.format(self.gpio_off_cntdn), verbosity)
+        print_verbose('', VERBOSE_DEBUG)
+        print_verbose('alpha_start_idle=={}'.format(self.alpha_start_idle), verbosity)
+        print_verbose('alpha_play_idle=={}'.format(self.alpha_play_idle), verbosity)
+        print_verbose('alpha_end_idle=={}'.format(self.alpha_end_idle), verbosity)
+        print_verbose('alpha_start_cntdn=={}'.format(self.alpha_start_cntdn), verbosity)
+        print_verbose('alpha_play_cntdn=={}'.format(self.alpha_play_cntdn), verbosity)
+        print_verbose('alpha_end_cntdn=={}'.format(self.alpha_end_cntdn), verbosity)
+        print_verbose('\n', VERBOSE_DEBUG)
+
+    def set_code_defaults(self):
+        global gl_verbosity
+        gl_verbosity = DEFAULT_VERBOSITY
+        
+        # Set the config parameters from code defaults
+        # given in global constants DEFAULT_...
+        self.timeslot = DEFAULT_TIMESLOT
+        self.randomindex_idle = DEFAULT_RANDOMINDEX_IDLE
+        self.randomindex_cntdn = DEFAULT_RANDOMINDEX_CNTDN
+        self.randomindex_appl = DEFAULT_RANDOMINDEX_APPL
+
+        self.fadetime_start_idle = DEFAULT_IDLE_FADETIME_START
+        self.fadetime_end_idle = DEFAULT_IDLE_FADETIME_END
+        self.alpha_start_idle = DEFAULT_IDLE_ALPHA_START
+        self.alpha_play_idle = DEFAULT_IDLE_ALPHA_PLAY
+        self.alpha_end_idle = DEFAULT_IDLE_ALPHA_END
+        self.fadetime_start_cntdn = DEFAULT_CNTDN_FADETIME_START
+        self.fadetime_end_cntdn = DEFAULT_CNTDN_FADETIME_END
+        self.gpio_on_cntdn = DEFAULT_CNTDN_GPIO_ON
+        self.gpio_off_cntdn = DEFAULT_CNTDN_GPIO_OFF
+        self.alpha_start_cntdn = DEFAULT_CNTDN_ALPHA_START
+        self.alpha_play_cntdn = DEFAULT_CNTDN_ALPHA_PLAY
+        self.alpha_end_cntdn = DEFAULT_CNTDN_ALPHA_END
+        
+    def read_from_cfg(self, filenam=None):
+        global gl_verbosity
+        
+        randomidx = None
+        randomidx_idle = None
+        randomidx_cntdn = None
+        randomidx_appl = None
+        
+        fadetime = None
+        fadetime_start = None
+        fadetime_end = None
+        fadetime_start_idle = None
+        fadetime_end_idle = None
+        fadetime_start_cntdn = None
+        fadetime_end_cntdn = None
+        gpio_on_cntdn = None
+        gpio_off_cntdn = None
+        
+        alpha = None
+        alpha_start = None
+        alpha_play = None
+        alpha_end = None
+        alpha_start_idle = None
+        alpha_play_idle = None
+        alpha_end_idle = None
+        alpha_start_cntdn = None
+        alpha_play_cntdn = None
+        alpha_end_cntdn = None
+        
+        if filenam is None:
+            # Check the command line parameters for config stuff:
+            f = [w[1:] for w in sys.argv[1:] if w[0] == '-']
+        else:
+            if filenam == '':
+                # Look for common config file at ~/.config:
+                filenam = os.path.realpath(sys.argv[0])
+                confnam = os.path.basename(filenam)  + '.conf'
+                confdir = os.path.join(os.path.expanduser('~'), '.config')
+                filenam = os.path.join(confdir, confnam)
+            try:
+                f = open(filenam, 'r')
+            except Exception:
+                print('cant read!')
+                f = []
+        for lin in f:
+            lin = lin.split('#')[0] # Remove comments marked with #
+            lin = [w.strip() for w in lin.split('=')]
+            if len(lin) >= 2:
+                # Integer parameters:
+                try:
+                    value = int(lin[1])
+                except Exception:
+                    value = None
+                else:
+                    if lin[0] == 'verbosity':
+                        gl_verbosity = value
+                    elif lin[0] == 'randomindex':
+                        randomidx = value
+                    elif lin[0] == 'randomindex_idle':
+                        randomidx_idle = value
+                    elif lin[0] == 'randomindex_cntdn':
+                        randomidx_cntdn = value
+                    elif lin[0] == 'randomindex_appl':
+                        randomidx_appl = value
+                    elif lin[0] == 'alpha':
+                        alpha = value
+                    elif lin[0] == 'alpha_start':
+                        alpha_start = value
+                    elif lin[0] == 'alpha_play':
+                        alpha_play = value
+                    elif lin[0] == 'alpha_end':
+                        alpha_end = value
+                    elif lin[0] == 'alpha_start_idle':
+                        alpha_start_idle = value
+                    elif lin[0] == 'alpha_play_idle':
+                        alpha_play_idle = value
+                    elif lin[0] == 'alpha_end_idle':
+                        alpha_end_idle = value
+                    elif lin[0] == 'alpha_start_cntdn':
+                        alpha_start_cntdn = value
+                    elif lin[0] == 'alpha_play_cntdn':
+                        alpha_play_cntdn = value
+                    elif lin[0] == 'alpha_end_cntdn':
+                        alpha_end_cntdn = value
+                # Floating-point parameters:
+                try:
+                    value = float(lin[1])
+                except Exception:
+                    value = None
+                else:
+                    if lin[0] == 'timeslot':
+                        self.timeslot = value
+                    elif lin[0] == 'fadetime':
+                        fadetime = value
+                    elif lin[0] == 'fadetime_start':
+                        fadetime_start = value
+                    elif lin[0] == 'fadetime_end':
+                        fadetime_end = value
+                    elif lin[0] == 'fadetime_start_idle':
+                        fadetime_start_idle = value
+                    elif lin[0] == 'fadetime_end_idle':
+                        fadetime_end_idle = value
+                    elif lin[0] == 'fadetime_start_cntdn':
+                        fadetime_start_cntdn = value
+                    elif lin[0] == 'fadetime_end_cntdn':
+                        fadetime_end_cntdn = value
+                    elif lin[0] == 'gpio_on_cntdn':
+                        gpio_on_cntdn = value
+                    elif lin[0] == 'gpio_off_cntdn':
+                        gpio_off_cntdn = value
+        # Close f only if it is really a file handle:
+        if type(f) is io.TextIOWrapper:
+            f.close()
+
+        # randomindex: # -1 random selection 0 continuous selection
+        if randomidx is not None:
+            self.randomindex_idle = randomidx
+            self.randomindex_cntdn = randomidx
+            self.randomindex_appl = randomidx
+        if randomidx_idle is not None:
+            self.randomindex_idle = randomidx_idle
+        if randomidx_cntdn is not None:
+            self.randomindex_cntdn = randomidx_cntdn
+        if randomidx_appl is not None:
+            self.randomindex_appl = randomidx_appl
+        
+        # fadetime in seconds:
+        if fadetime is not None:
+            self.fadetime_start_idle = fadetime
+            self.fadetime_end_idle = fadetime
+            self.fadetime_start_cntdn = fadetime
+            self.fadetime_end_cntdn = fadetime
+        if fadetime_start is not None:
+            self.fadetime_start_idle = fadetime_start
+            self.fadetime_start_cntdn = fadetime_start
+        if fadetime_end is not None:
+            self.fadetime_end_idle = fadetime_end
+            self.fadetime_end_cntdn = fadetime_end
+        if fadetime_start_idle is not None:
+            self.fadetime_start_idle = fadetime_start_idle
+        if fadetime_start_cntdn is not None:
+            self.fadetime_start_cntdn = fadetime_start_cntdn
+        if fadetime_end_idle is not None:
+            self.fadetime_end_idle = fadetime_end_idle
+        if fadetime_end_cntdn is not None:
+            self.fadetime_end_cntdn = fadetime_end_cntdn
+        # GPIO time in seconds:
+        if gpio_on_cntdn is not None:
+            self.gpio_on_cntdn = gpio_on_cntdn
+        if gpio_off_cntdn is not None:
+            self.gpio_off_cntdn = gpio_off_cntdn
+            
+        # alpha (video transparency):
+        if alpha is not None:
+            self.alpha_start_idle = alpha
+            self.alpha_play_idle = alpha
+            self.alpha_end_idle = alpha
+            self.alpha_start_cntdn = alpha
+            self.alpha_play_cntdn = alpha
+            self.alpha_end_cntdn = alpha
+        if alpha_start is not None:
+            self.alpha_start_idle = alpha_start
+            self.alpha_start_cntdn = alpha_start
+        if alpha_play is not None:
+            self.alpha_play_idle = alpha_play
+            self.alpha_play_cntdn = alpha_play
+        if alpha_end is not None:
+            self.alpha_end_idle = alpha_end
+            self.alpha_end_cntdn = alpha_end
+        if alpha_start_idle is not None:
+            self.alpha_start_idle = alpha_start_idle
+        if alpha_start_cntdn is not None:
+            self.alpha_start_cntdn = alpha_start_cntdn
+        if alpha_play_idle is not None:
+            self.alpha_play_idle = alpha_play_idle
+        if alpha_play_cntdn is not None:
+            self.alpha_play_cntdn = alpha_play_cntdn
+        if alpha_end_idle is not None:
+            self.alpha_end_idle = alpha_end_idle
+        if alpha_end_cntdn is not None:
+            self.alpha_end_cntdn = alpha_end_cntdn
+
+    def set_common_config(self):
+        self.set_code_defaults() # Take hard-coded default parameters
+        #self.print_properties('hard-coded default values')
+        self.read_from_cfg('')   # Overwrite parameters with common config file
+        #self.print_properties('Common Config File')
+        self.read_from_cfg(None) # Overwrite parameters with command line
+        self.print_properties('CMDLIN PARAMS')
+        pass
+
+    def videos(self, category):
+        # Take video list from filenames given by command line parameters,
+        # introduced by a category parameter like "-idle:", "-cntdn:", "-appl:"
+        found = False
+        files = []
+        for w in sys.argv[1:]:
+            if w == category: 
+                found = True
+            elif w[0] == '-':
+                found = False
+            else:
+                if found:
+                    # TODO: parse m3u files
+                    files.append(os.path.realpath(w)) # Follow symbolic links!
+        return files
+
+
 class VideoPlayer:
     def __init__(self, layer):
         self.layer = layer # omxplayer video render layer 
@@ -156,7 +428,20 @@ class VideoPlayer:
                        Connection=None,
                        dbus_name=None,
                        pause=True):
-        if self.omxplayer is None:
+        if filenam is None:
+            # No video filename was given, e.g. due to empty video list:
+            ret = 10
+        elif not os.path.exists(filenam):
+            # Given filename doesn't exist:
+            ret = 11
+        elif os.path.isdir(filenam):
+        #elif os.path.ismount(filenam) or os.path.isdir(filenam):
+            # Given filename is a (mount point) directory:
+            ret = 12
+        elif not os.access(filenam, os.R_OK):
+            # Read permission denied to filenam:
+            ret = 13
+        elif self.omxplayer is None:
             # Create a new omxplayer instance:
             try:
                 self.omxplayer = omxplayer.player.OMXPlayer(filenam, args,
@@ -164,7 +449,7 @@ class VideoPlayer:
                                                             Connection,
                                                             dbus_name,
                                                             pause)
-            except:
+            except Exception:
                 ret = 1
             else:
                 ret = 0
@@ -174,7 +459,7 @@ class VideoPlayer:
                     # self.duration to get faster access on repeated calls:
                     self.duration = self.omxplayer.duration()
                     self.position = 0
-                except:
+                except Exception:
                     # An error occurred when examining the video duration:
                     self.duration = -1
                     ret = 2
@@ -214,11 +499,11 @@ class VideoPlayer:
             if self.omxplayer is not None:
                 try:
                     self.omxplayer.set_alpha(alpha)
-                except:
+                except Exception:
                     pass
                 try:
                     self.omxplayer.set_volume(alpha / 255)
-                except:
+                except Exception:
                     pass
             self.last_alpha = alpha
 
@@ -279,51 +564,28 @@ class VideoPlayer:
 
 class StateMachine:
     def __init__(self):
-        self.cmdlin_params = sys.argv[1:]
         self.exitcode = 0
+        self.omxplayer_cmdlin_params = []
+
+        self.cfg = Config()
+        self.cfg.set_common_config()
         
-        #self.videos_idle = ['/home/pi/Videos/Animationen_converted.mp4',
-        #                    '/home/pi/Videos/Günter Grünwald - Saupreiß.mp4',
-        #                    '/home/pi/Videos/Sprachprobleme im Biergarten.mp4',
-        #                    '/home/pi/Videos/Der weiß-blaue Babystrampler.mp4',
-        #                   ]        
+        # Non-video properties:
+        self.timeslot = self.cfg.timeslot
         
-        ## Test videos with durations from 0:03 to 0:22
-        ## by www.studioschraut.de from vimeo:
-        ## Download them from https://vimeo.com/studioschraut
-        #self.videos_idle = ['/home/pi/Videos/01_CD Promo on Vimeo.mp4',
-        #                    '/home/pi/Videos/02_WIDESCREEN SHOW Intro on Vimeo.mp4',
-        #                    #'/home/pi/Videos/03_Messe on Vimeo.mp4',
-        #                    '/home/pi/Videos/04_SFT SPOT TV Commercial on Vimeo.mp4',
-        #                    '/home/pi/Videos/05_Play Vanilla TV Spot on Vimeo.mp4'#,
-        #                    #'/home/pi/Videos/06_PCG PP Commercial on Vimeo.mp4'
-        #                   ]
-        self.videos_idle = ['/home/pi/ravidplay/videos/idle/Random_looping_start_sequence_1.mp4',
-                            '/home/pi/ravidplay/videos/idle/Random_looping_start_sequence_2.mp4',
-                            '/home/pi/ravidplay/videos/idle/Random_looping_start_sequence_3.mp4'
-                           ]
+        self.randomindex_idle = self.cfg.randomindex_idle
+        self.randomindex_cntdn = self.cfg.randomindex_cntdn
+        self.randomindex_appl = self.cfg.randomindex_appl
         
-        
-        #self.videos_cntdn = ['/home/pi/Videos/Disturbed_LandOfConfusion16s.mp4']
-        self.videos_cntdn = ['/home/pi/ravidplay/videos/cntdn/Random_emphasize_sequence_1.mp4',
-                             '/home/pi/ravidplay/videos/cntdn/Random_emphasize_sequence_2.mp4',
-                             '/home/pi/ravidplay/videos/cntdn/Random_emphasize_sequence_3.mp4'
-                            ]
-        
-        
-        
-        #self.videos_appl = ['/home/pi/Videos/AlanWalker_Spectre15s.mp4']
-        self.videos_appl = ['/home/pi/ravidplay/videos/appl/Random_event-based_sequence_1.mp4',
-                            '/home/pi/ravidplay/videos/appl/Random_event-based_sequence_2.mp4',
-                            '/home/pi/ravidplay/videos/appl/Random_event-based_sequence_3.mp4'
-                           ]
+        self.videos_idle = self.cfg.videos('-idle:')
+        self.videos_cntdn = self.cfg.videos('-cntdn:')
+        self.videos_appl = self.cfg.videos('-appl:')
 
         # Create two instances of omxplayer management:
         self.manage_instance = 0
         self.pl = [None, None]
         self.pl[OMXINSTANCE_VIDEO1] = VideoPlayer(OMXLAYER[OMXINSTANCE_VIDEO1])
         self.pl[OMXINSTANCE_VIDEO2] = VideoPlayer(OMXLAYER[OMXINSTANCE_VIDEO2])
-        
 #        self.pl[OMXINSTANCE_VIDEO1].videosize = '260,50,1220,590' # DEBUG!
 #        self.pl[OMXINSTANCE_VIDEO2].videosize = '870,150,1830,690' # DEBUG!
         
@@ -332,12 +594,6 @@ class StateMachine:
         self.gpio_triggerpin = gpiozero.LED(7) # J8 pin 26
         self.gpio_exitbtn = gpiozero.Button(23) # J8 pin 16
         
-        # Non-video properties:
-        self.timeslot = 0.02 # todo: CMDLIN_PARAM
-        
-        self.randomindex_idle = 0  # -1 random selection 0 continuous selection
-        self.randomindex_cntdn = 0 # -1 random selection 0 continuous selection
-        self.randomindex_appl = 0  # -1 random selection 0 continuous selection
         
         # Initialisation of the state machine:
         self.warnmsg = ''
@@ -352,7 +608,7 @@ class StateMachine:
             print_verbose('    omxplayer instance[{}]: "{}"'.format(
                           i, self.pl[i].playback_status),
                           VERBOSE_SHOW_INSTANCES)
-        if press_enter == True and VERBOSITY >= VERBOSE_SHOW_INSTANCES:
+        if press_enter == True and gl_verbosity >= VERBOSE_SHOW_INSTANCES:
             print_verbose('--> press <ENTER>...', VERBOSE_SHOW_INSTANCES)
             input()
         
@@ -389,47 +645,59 @@ class StateMachine:
         if state == STATE_EXIT: # If so, take current state of state machine
             state = self.state
         if state == STATE_SELECT_IDLE_VIDEO:
-            if self.randomindex_idle < 0:
+            length = len(self.videos_idle)
+            if length <= 0:
+                index = -1
+                filenam = None
+            elif self.randomindex_idle < 0:
                 # random selection:
-                index = random.randint(0, len(self.videos_idle) - 1)
+                index = random.randint(0, length - 1)
             else:
                 # continuous selection:
                 index = self.randomindex_idle
                 filenam = self.videos_idle[index]
                 self.randomindex_idle += order
-                if self.randomindex_idle >= len(self.videos_idle):
+                if self.randomindex_idle >= length:
                     self.randomindex_idle = 0
                 if self.randomindex_idle < 0:
-                    self.randomindex_idle = len(self.videos_idle) - 1
+                    self.randomindex_idle = length - 1
         elif state == STATE_SELECT_APPL_VIDEO:
-            if self.randomindex_appl < 0:
+            length = len(self.videos_appl)
+            if length <= 0:
+                index = -1
+                filenam = None
+            elif self.randomindex_appl < 0:
                 # random selection:
-                index = random.randint(0, len(self.videos_appl) - 1)
+                index = random.randint(0, length - 1)
             else:
                 # continuous selection:
                 index = self.randomindex_appl
                 filenam = self.videos_appl[index]
                 self.randomindex_appl += 1
-                if self.randomindex_appl >= len(self.videos_appl):
+                if self.randomindex_appl >= length:
                     self.randomindex_appl = 0
                 if self.randomindex_appl < 0:
-                    self.randomindex_appl = len(self.videos_appl) - 1
+                    self.randomindex_appl = length - 1
         elif state == STATE_SELECT_CNTDN_VIDEO or \
              state == STATE_PREPARE_CNTDN_VIDEO:
-            if self.randomindex_cntdn < 0:
+            length = len(self.videos_cntdn)
+            if length <= 0:
+                index = -1
+                filenam = None
+            elif self.randomindex_cntdn < 0:
                 # random selection:
-                index = random.randint(0, len(self.videos_cntdn) - 1)
+                index = random.randint(0, length - 1)
             else:
                 # continuous selection:
                 index = self.randomindex_cntdn
                 filenam = self.videos_cntdn[index]
                 self.randomindex_cntdn += 1
-                if self.randomindex_cntdn >= len(self.videos_cntdn):
+                if self.randomindex_cntdn >= length:
                     self.randomindex_cntdn = 0
                 if self.randomindex_cntdn < 0:
-                    self.randomindex_cntdn = len(self.videos_cntdn) - 1
+                    self.randomindex_cntdn = length - 1
         else: # invalid state of state machine
-            index = -1
+            index = -2
             filenam = None
         return [index, filenam]
 
@@ -455,18 +723,18 @@ class StateMachine:
         else: # A free omxplayer instance is available:
             if self.state == STATE_SELECT_IDLE_VIDEO or \
                self.state == STATE_SELECT_APPL_VIDEO:
-                self.pl[inst].fadetime_start = CMDLINPAR_IDLE_FADETIME_START
-                self.pl[inst].fadetime_end = CMDLINPAR_IDLE_FADETIME_END
-                self.pl[inst].alpha_start = CMDLINPAR_IDLE_ALPHA_START
-                self.pl[inst].alpha_play = CMDLINPAR_IDLE_ALPHA_PLAY
-                self.pl[inst].alpha_end = CMDLINPAR_IDLE_ALPHA_END
+                self.pl[inst].fadetime_start = self.cfg.fadetime_start_idle
+                self.pl[inst].fadetime_end = self.cfg.fadetime_end_idle
+                self.pl[inst].alpha_start = self.cfg.alpha_start_idle
+                self.pl[inst].alpha_play = self.cfg.alpha_play_idle
+                self.pl[inst].alpha_end = self.cfg.alpha_end_idle
                 self.pl[inst].last_alpha = 0
             elif self.state == STATE_SELECT_CNTDN_VIDEO:
-                self.pl[inst].fadetime_start = CMDLINPAR_CNTDN_FADETIME_START
-                self.pl[inst].fadetime_end = CMDLINPAR_CNTDN_FADETIME_END
-                self.pl[inst].alpha_start = CMDLINPAR_CNTDN_ALPHA_START
-                self.pl[inst].alpha_play = CMDLINPAR_CNTDN_ALPHA_PLAY
-                self.pl[inst].alpha_end = CMDLINPAR_CNTDN_ALPHA_END
+                self.pl[inst].fadetime_start = self.cfg.fadetime_start_cntdn
+                self.pl[inst].fadetime_end = self.cfg.fadetime_end_cntdn
+                self.pl[inst].alpha_start = self.cfg.alpha_start_cntdn
+                self.pl[inst].alpha_play = self.cfg.alpha_play_cntdn
+                self.pl[inst].alpha_end = self.cfg.alpha_end_cntdn
                 self.pl[inst].last_alpha = 0
                 
                 # This is necessary if self.state_prepare_cntdn_video()
@@ -476,8 +744,8 @@ class StateMachine:
                 # two video sequences.
                 # TODO: update default parameters for CNTDN
                 self.pl[inst].gpio_pin = self.gpio_triggerpin
-                self.pl[inst].gpio_on = 2
-                self.pl[inst].gpio_off = 1                
+                self.pl[inst].gpio_on = self.cfg.gpio_on_cntdn
+                self.pl[inst].gpio_off = self.cfg.gpio_off_cntdn
             else:    
                 inst = OMXINSTANCE_ERR_WRONG_STATE
 
@@ -499,7 +767,7 @@ class StateMachine:
                      '--layer', OMXLAYER[inst],
                      '--alpha', self.pl[inst].last_alpha,
                      '--vol', '-10000'
-                    ] + self.cmdlin_params,
+                    ] + self.omxplayer_cmdlin_params,
                     dbus_name=dbus_path,
                     pause=True)
             
@@ -511,6 +779,7 @@ class StateMachine:
                     VERBOSE_VIDEOINFO)
             else:
                 inst = OMXINSTANCE_ERR_NO_VIDEO
+                # omxplayer errors:
                 if ret == 1:
                     self.errmsg = 'ret=={}: ' \
                         'omxplayer initialisation of instance[{}] ' \
@@ -524,6 +793,21 @@ class StateMachine:
                     self.errmsg = 'ret=={}: ' \
                         'Another omxplayer instance[{}] is already ' \
                         'running.'.format(ret, inst)
+                # file access errors:
+                elif ret == 10:
+                    self.errmsg = 'ret=={}: ' \
+                        'No video filename was given, ' \
+                        'e.g. due to empty video list.'.format(ret)
+                elif ret == 11:
+                    self.errmsg = 'ret=={}: ' \
+                        'File "{}" not found.'.format(ret, filenam)
+                elif ret == 12:
+                    self.errmsg = 'ret=={}: ' \
+                        'File "{}" is a directory.'.format(ret, filenam)
+                elif ret == 13:
+                    self.errmsg = 'ret=={}: ' \
+                        'Read permission denied to file ' \
+                        '"{}".'.format(ret, filenam)
                 else:
                     self.errmsg = 'ret=={}: ' \
                         'Unknown error at initialisation of instance[{}] ' \
@@ -543,7 +827,7 @@ class StateMachine:
                               self.pl[inst].omxplayer.position() \
                               + self.pl[inst].fadetime_end \
                               + self.timeslot
-            except:
+            except Exception:
                 # Don't mind if it doesn't work 
                 # due to some rare error conditions(?)
                 # caused by bad timing(?) of buzzer pressure.
@@ -646,8 +930,8 @@ class StateMachine:
                 self.random_video(-1, STATE_SELECT_IDLE_VIDEO) #keep idle order
                 # todo: update default parameters for CNTDN
                 self.pl[inst_paused].gpio_pin = self.gpio_triggerpin
-                self.pl[inst_paused].gpio_on = 2
-                self.pl[inst_paused].gpio_off = 1
+                self.pl[inst_paused].gpio_on = self.cfg.gpio_on_cntdn
+                self.pl[inst_paused].gpio_off = self.cfg.gpio_off_cntdn
                 # todo: load video-specific meta file
                 print_verbose('file to exchange: "{}"'.format(
                         video[VID_FILENAM]),
@@ -689,7 +973,7 @@ class StateMachine:
                 # to the defined fade-out time of the planned CNTDN video
                 # sequence:
                 self.pl[inst_playing].fadetime_end = \
-                     CMDLINPAR_CNTDN_FADETIME_END # todo!
+                     self.cfg.fadetime_end_cntdn # todo!
                 # Shorten the duration of the running idle video sequence
                 # to "now" + fade_out time of CNTDN video sequence:
                 self.shorten_duration(inst_playing)
@@ -865,7 +1149,7 @@ class StateMachine:
         # cleanup all omxplayer instances
         for pl in self.pl:
             pl.unload_omxplayer()
-        if VERBOSITY >= VERBOSE_STATE:
+        if gl_verbosity >= VERBOSE_STATE:
             print()
 
 
@@ -874,4 +1158,5 @@ if __name__ == '__main__':
     statemachine = StateMachine()
     statemachine.run()
     sys.exit(statemachine.exitcode)
+    
 #EOF
