@@ -36,13 +36,18 @@ in this priority order:
 1) done -- take the values given in the source code
 2) done -- read the global config file ~/.config/ravidplay.py.conf and update the values
 3) done -- update all values given by commandline parameters
-4) OPEN -- read a local config file with same filename as the according video
+4) OPEN -- read a local (individual) config file with same filename as the according video
 
 Configurable window sizes for both omxplayer instances
 
 Applause video:  
 Don't take next video of list while waiting for free omxplayer instance on
 sequential playing order (`randomindex_appl=0`)
+
+File lists as m3u files.
+
+IMPORTANT:  
+Don't exit on wrong or not existing file names but skip them! Only create an error if any file of the list is wrong.
 
 ## Software Installation and Quick Start on the Raspberry Pi
 Clone this repository onto the Raspberry Pi and start the installation
