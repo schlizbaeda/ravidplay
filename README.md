@@ -59,8 +59,21 @@ git clone https://github.com/schlizbaeda/ravidplay
 cd ravidplay
 ./ravidplay-setup.sh
 
+# Workaround for Python 3.7.3 on Raspberry Pi OS (Legacy):
+pip3 list | grep evento    # Show current evento version: v2.0.1 (or higher)
+sudo pip3 uninstall evento # uninstall evento v2.0.1
+sudo pip3 install evento   # install evento v1.0.2
+pip3 list | grep evento    # check for version v1.0.2
+
 ./ravidplay.py -idle: videos/idle/* -cntdn: videos/cntdn/* -appl: videos/appl/*
 ```
+Remark:  
+The workaround is necessary since the python module *evento v2.x.y* expects at
+least Python 3.10.x. But on *Raspberry Pi OS (Legacy)* based on *Buster* there
+is Python 3.7.3 installed. So we need an old version of *evento* like v1.0.2.  
+After uninstalling the too new version 2.x.y from the Raspberry Pi, `pip3`
+seems to find the highest version of *evento* working on Python 3.7.x
+automagically.
 
 ## Adjustment of Raspberry Pi OS desktop
 Despite RaVidPlay is running on *Raspberry Pi OS* independent of the chosen
